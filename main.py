@@ -2,6 +2,8 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.platform import MessageType
+import json
+from pathlib import Path
 
 @register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
 class MyPlugin(Star):
@@ -9,9 +11,33 @@ class MyPlugin(Star):
         super().__init__(context)
         # 存储已注册的群组信息
         self.registered_groups: dict[str, str] = {}  # group_id -> session_id
+        # 数据文件路径
+        self.data_file = Path(context.get_config("data_dir", "data")) / "registered_groups.json"
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """加载已注册的群组信息。"""
+        await self._load_groups()
+
+    async def _load_groups(self):
+        """从文件加载注册的群组信息。"""
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, "r", encoding="utf-8") as f:
+                    self.registered_groups = json.load(f)
+                logger.info(f"[MC_Hack_Mod] 已加载 {len(self.registered_groups)} 个注册群组")
+        except Exception as e:
+            logger.error(f"[MC_Hack_Mod] 加载注册群组失败: {e}")
+
+    async def _save_groups(self):
+        """保存注册的群组信息到文件。"""
+        try:
+            # 确保目录存在
+            self.data_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.data_file, "w", encoding="utf-8") as f:
+                json.dump(self.registered_groups, f, ensure_ascii=False, indent=2)
+            logger.info(f"[MC_Hack_Mod] 已保存 {len(self.registered_groups)} 个注册群组")
+        except Exception as e:
+            logger.error(f"[MC_Hack_Mod] 保存注册群组失败: {e}")
 
     # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
     @filter.command("helloworld")
@@ -39,6 +65,9 @@ class MyPlugin(Star):
         # 存储群组信息
         self.registered_groups[group_id] = session_id
         
+        # 保存到文件
+        await self._save_groups()
+        
         # 获取平台适配器并记录会话信息
         try:
             platform = self.context.get_platform(platform_name)
@@ -51,6 +80,28 @@ class MyPlugin(Star):
         except Exception as e:
             logger.error(f"[MC_Hack_Mod] 注册群组失败: {e}")
             yield event.plain_result(f"注册失败: {str(e)}")
+
+    @filter.command("unregister_group")
+    async def unregister_group(self, event: AstrMessageEvent):
+        """取消注册当前群聊。"""
+        if event.get_group_id() is None:
+            yield event.plain_result("此指令只能在群聊中使用")
+            return
+        
+        group_id = event.get_group_id()
+        
+        if group_id not in self.registered_groups:
+            yield event.plain_result(f"群组 {group_id} 未注册")
+            return
+        
+        # 删除群组信息
+        del self.registered_groups[group_id]
+        
+        # 保存到文件
+        await self._save_groups()
+        
+        logger.info(f"[MC_Hack_Mod] 取消注册群组: {group_id}")
+        yield event.plain_result(f"群组 {group_id} 已取消注册")
 
     @filter.command("list_groups")
     async def list_groups(self, event: AstrMessageEvent):
