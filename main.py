@@ -113,5 +113,49 @@ class MyPlugin(Star):
         groups_info = "\n".join([f"群组 {gid}: {sid}" for gid, sid in self.registered_groups.items()])
         yield event.plain_result(f"已注册的群组:\n{groups_info}")
 
+    @filter.command("test_broadcast")
+    async def test_broadcast(self, event: AstrMessageEvent):
+        """向所有已注册的群组发送测试消息。"""
+        if not self.registered_groups:
+            yield event.plain_result("暂无已注册的群组，请先使用 /register_group 注册")
+            return
+        
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+        from astrbot.core.platform.message_session import MessageSesion
+        
+        success_count = 0
+        fail_count = 0
+        test_message = "这是一条测试消息"
+        
+        for group_id, session_id in self.registered_groups.items():
+            try:
+                # 获取平台适配器
+                platform = self.context.get_platform(event.get_platform_name())
+                if not platform:
+                    logger.error(f"[MC_Hack_Mod] 未找到平台适配器: {event.get_platform_name()}")
+                    fail_count += 1
+                    continue
+                
+                # 创建消息会话
+                session = MessageSesion(
+                    platform_name=event.get_platform_name(),
+                    message_type=MessageType.GROUP_MESSAGE,
+                    session_id=session_id,
+                )
+                
+                # 创建消息链
+                message_chain = MessageChain(chain=[Plain(test_message)])
+                
+                # 发送消息
+                await platform.send_by_session(session, message_chain)
+                success_count += 1
+                logger.info(f"[MC_Hack_Mod] 测试消息发送成功: {group_id}")
+            except Exception as e:
+                fail_count += 1
+                logger.error(f"[MC_Hack_Mod] 测试消息发送失败 {group_id}: {e}")
+        
+        yield event.plain_result(f"测试消息发送完成: 成功 {success_count} 个, 失败 {fail_count} 个")
+
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
