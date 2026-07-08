@@ -115,6 +115,19 @@ class MyPlugin(Star):
             if self.data_file.exists():
                 with open(self.data_file, "r", encoding="utf-8") as f:
                     self.registered_groups = json.load(f)
+                # 兼容旧数据格式: group_id -> session_id (string)
+                # 新格式: group_id -> {session_id, platform_name}
+                need_save = False
+                for gid, val in list(self.registered_groups.items()):
+                    if isinstance(val, str):
+                        self.registered_groups[gid] = {
+                            "session_id": val,
+                            "platform_name": "unknown",
+                        }
+                        need_save = True
+                if need_save:
+                    await self._save_groups()
+                    logger.warning("[MC_Hack_Mod] 检测到旧数据格式，已自动转换。旧注册的群组需要重新注册才能通过HTTP接口发送消息。")
                 logger.info(f"[MC_Hack_Mod] 已加载 {len(self.registered_groups)} 个注册群组")
         except Exception as e:
             logger.error(f"[MC_Hack_Mod] 加载注册群组失败: {e}")
