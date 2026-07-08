@@ -4,6 +4,8 @@ from astrbot.api import logger
 from astrbot.api.platform import MessageType
 from astrbot.core.star.star_tools import StarTools
 import json
+import asyncio
+from aiohttp import web
 
 @register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
 class MyPlugin(Star):
@@ -13,10 +15,92 @@ class MyPlugin(Star):
         self.registered_groups: dict[str, str] = {}  # group_id -> session_id
         # 数据文件路径
         self.data_file = StarTools.get_data_dir() / "registered_groups.json"
+        # HTTP服务器相关
+        self.http_runner = None
+        self.http_site = None
 
     async def initialize(self):
-        """加载已注册的群组信息。"""
+        """加载已注册的群组信息并启动HTTP服务器。"""
         await self._load_groups()
+        await self._start_http_server()
+
+    async def _start_http_server(self):
+        """启动HTTP服务器，监听8082端口。"""
+        try:
+            app = web.Application()
+            app.router.add_get('/health', self._handle_health)
+            app.router.add_post('/sendMsg', self._handle_send_msg)
+            
+            self.http_runner = web.AppRunner(app)
+            await self.http_runner.setup()
+            self.http_site = web.TCPSite(self.http_runner, '0.0.0.0', 8082)
+            await self.http_site.start()
+            logger.info("[MC_Hack_Mod] HTTP服务器已启动，监听端口 8082")
+        except Exception as e:
+            logger.error(f"[MC_Hack_Mod] HTTP服务器启动失败: {e}")
+
+    async def _handle_health(self, request):
+        """健康检查接口。"""
+        return web.json_response({"status": "ok", "registered_groups": len(self.registered_groups)})
+
+    async def _handle_send_msg(self, request):
+        """发送消息接口，向所有已注册群组广播消息。"""
+        try:
+            data = await request.json()
+            player_name = data.get('playerName')
+            msg_type = data.get('type')
+            message = data.get('message')
+            
+            if not all([player_name, msg_type, message]):
+                return web.json_response({"error": "缺少必要参数: playerName, type, message"}, status=400)
+            
+            if not self.registered_groups:
+                return web.json_response({"error": "暂无已注册的群组"}, status=404)
+            
+            # 拼接消息内容
+            formatted_message = f"[{msg_type}] {player_name}: {message}"
+            
+            from astrbot.api.event import MessageChain
+            from astrbot.api.message_components import Plain
+            from astrbot.core.platform.message_session import MessageSesion
+            
+            success_count = 0
+            fail_count = 0
+            
+            # 获取平台适配器
+            platforms = self.context.platform_manager.get_insts()
+            if not platforms:
+                return web.json_response({"error": "没有可用的平台适配器"}, status=500)
+            
+            platform = platforms[0]
+            
+            for group_id, session_id in self.registered_groups.items():
+                try:
+                    # 创建消息会话
+                    session = MessageSesion(
+                        platform_name=platform.metadata.name,
+                        message_type=MessageType.GROUP_MESSAGE,
+                        session_id=session_id,
+                    )
+                    
+                    # 创建消息链
+                    message_chain = MessageChain(chain=[Plain(formatted_message)])
+                    
+                    # 发送消息
+                    await platform.send_by_session(session, message_chain)
+                    success_count += 1
+                    logger.info(f"[MC_Hack_Mod] 消息发送成功: {group_id}")
+                except Exception as e:
+                    fail_count += 1
+                    logger.error(f"[MC_Hack_Mod] 消息发送失败 {group_id}: {e}")
+            
+            return web.json_response({
+                "success": True,
+                "message": f"广播完成: 成功 {success_count} 个, 失败 {fail_count} 个"
+            })
+        except Exception as e:
+            logger.error(f"[MC_Hack_Mod] sendMsg接口错误: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
     async def _load_groups(self):
         """从文件加载注册的群组信息。"""
@@ -159,3 +243,10 @@ class MyPlugin(Star):
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        # 关闭HTTP服务器
+        if self.http_site:
+            await self.http_site.stop()
+            logger.info("[MC_Hack_Mod] HTTP服务器已停止")
+        if self.http_runner:
+            await self.http_runner.cleanup()
+            logger.info("[MC_Hack_Mod] HTTP服务器资源已释放")
