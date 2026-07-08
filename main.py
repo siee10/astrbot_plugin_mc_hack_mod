@@ -11,8 +11,8 @@ from aiohttp import web
 class MyPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
-        # 存储已注册的群组信息
-        self.registered_groups: dict[str, str] = {}  # group_id -> session_id
+        # 存储已注册的群组信息: group_id -> {session_id, platform_name}
+        self.registered_groups: dict[str, dict] = {}
         # 数据文件路径
         self.data_file = StarTools.get_data_dir() / "registered_groups.json"
         # HTTP服务器相关
@@ -46,7 +46,11 @@ class MyPlugin(Star):
     async def _handle_send_msg(self, request):
         """发送消息接口，向所有已注册群组广播消息。"""
         try:
-            data = await request.json()
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({"error": "请求体不是有效的JSON格式"}, status=400)
+            
             player_name = data.get('playerName')
             msg_type = data.get('type')
             message = data.get('message')
@@ -67,18 +71,21 @@ class MyPlugin(Star):
             success_count = 0
             fail_count = 0
             
-            # 获取平台适配器
-            platforms = self.context.platform_manager.get_insts()
-            if not platforms:
-                return web.json_response({"error": "没有可用的平台适配器"}, status=500)
-            
-            platform = platforms[0]
-            
-            for group_id, session_id in self.registered_groups.items():
+            for group_id, group_info in self.registered_groups.items():
                 try:
+                    session_id = group_info["session_id"]
+                    platform_name = group_info["platform_name"]
+                    
+                    # 根据平台名称获取平台适配器
+                    platform = self.context.get_platform(platform_name)
+                    if not platform:
+                        logger.error(f"[MC_Hack_Mod] 未找到平台适配器: {platform_name}")
+                        fail_count += 1
+                        continue
+                    
                     # 创建消息会话
                     session = MessageSesion(
-                        platform_name=platform.metadata.name,
+                        platform_name=platform_name,
                         message_type=MessageType.GROUP_MESSAGE,
                         session_id=session_id,
                     )
@@ -146,8 +153,11 @@ class MyPlugin(Star):
         group_id = event.get_group_id()
         session_id = event.session_id
         
-        # 存储群组信息
-        self.registered_groups[group_id] = session_id
+        # 存储群组信息（包含平台名称）
+        self.registered_groups[group_id] = {
+            "session_id": session_id,
+            "platform_name": platform_name,
+        }
         
         # 保存到文件
         await self._save_groups()
@@ -194,7 +204,7 @@ class MyPlugin(Star):
             yield event.plain_result("暂无已注册的群组")
             return
         
-        groups_info = "\n".join([f"群组 {gid}: {sid}" for gid, sid in self.registered_groups.items()])
+        groups_info = "\n".join([f"群组 {gid} ({info['platform_name']}): {info['session_id']}" for gid, info in self.registered_groups.items()])
         yield event.plain_result(f"已注册的群组:\n{groups_info}")
 
     @filter.command("test_broadcast")
@@ -212,18 +222,21 @@ class MyPlugin(Star):
         fail_count = 0
         test_message = "这是一条测试消息"
         
-        for group_id, session_id in self.registered_groups.items():
+        for group_id, group_info in self.registered_groups.items():
             try:
+                session_id = group_info["session_id"]
+                platform_name = group_info["platform_name"]
+                
                 # 获取平台适配器
-                platform = self.context.get_platform(event.get_platform_name())
+                platform = self.context.get_platform(platform_name)
                 if not platform:
-                    logger.error(f"[MC_Hack_Mod] 未找到平台适配器: {event.get_platform_name()}")
+                    logger.error(f"[MC_Hack_Mod] 未找到平台适配器: {platform_name}")
                     fail_count += 1
                     continue
                 
                 # 创建消息会话
                 session = MessageSesion(
-                    platform_name=event.get_platform_name(),
+                    platform_name=platform_name,
                     message_type=MessageType.GROUP_MESSAGE,
                     session_id=session_id,
                 )
