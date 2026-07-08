@@ -2,8 +2,8 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.platform import MessageType
+from astrbot.core.star.star_tools import StarTools
 import json
-from pathlib import Path
 
 @register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
 class MyPlugin(Star):
@@ -12,7 +12,7 @@ class MyPlugin(Star):
         # 存储已注册的群组信息
         self.registered_groups: dict[str, str] = {}  # group_id -> session_id
         # 数据文件路径
-        self.data_file = Path(context.get_config("data_dir", "data")) / "registered_groups.json"
+        self.data_file = StarTools.get_data_dir() / "registered_groups.json"
 
     async def initialize(self):
         """加载已注册的群组信息。"""
