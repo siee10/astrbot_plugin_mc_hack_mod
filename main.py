@@ -44,10 +44,15 @@ class MyPlugin(Star):
         return web.json_response({"status": "ok", "registered_groups": len(self.registered_groups)})
 
     async def _handle_send_msg(self, request):
-        """发送消息接口，向所有已注册群组广播消息。"""
+        """发送消息接口,向所有已注册群组广播消息。"""
         try:
+            # 获取来访者IP
+            remote_ip = request.remote if request.remote else "unknown"
+            logger.info(f"[MC_Hack_Mod] 收到请求 - IP: {remote_ip}")
+
             try:
                 data = await request.json()
+                logger.info(f"[MC_Hack_Mod] 请求报文: {json.dumps(data, ensure_ascii=False)}")
             except Exception:
                 return web.json_response({"error": "请求体不是有效的JSON格式"}, status=400)
             
