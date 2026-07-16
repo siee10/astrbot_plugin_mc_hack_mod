@@ -30,6 +30,7 @@ class MyPlugin(Star):
             app = web.Application()
             app.router.add_get('/health', self._handle_health)
             app.router.add_post('/sendMsg', self._handle_send_msg)
+            app.router.add_get('/getConfig', self._handle_get_config)
             
             self.http_runner = web.AppRunner(app)
             await self.http_runner.setup()
@@ -112,6 +113,38 @@ class MyPlugin(Star):
             })
         except Exception as e:
             logger.error(f"[MC_Hack_Mod] sendMsg接口错误: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_get_config(self, request):
+        """获取配置文件接口，通过查询参数 fileName 指定文件名。"""
+        try:
+            remote_ip = request.remote if request.remote else "unknown"
+            logger.info(f"[MC_Hack_Mod] 收到getConfig请求 - IP: {remote_ip}")
+
+            file_name = request.query.get('fileName')
+            if not file_name:
+                return web.json_response({"error": "缺少必要参数: fileName"}, status=400)
+
+            # 安全校验：防止路径穿越
+            import os
+            if '/' in file_name or '\\' in file_name or '..' in file_name:
+                return web.json_response({"error": "文件名不合法"}, status=400)
+
+            # 配置文件存放目录：插件数据目录下的 configs 文件夹
+            config_dir = self.data_file.parent / "configs"
+            file_path = config_dir / file_name
+
+            if not file_path.exists():
+                return web.json_response({"error": f"配置文件 {file_name} 不存在"}, status=404)
+
+            if not file_path.is_file():
+                return web.json_response({"error": f"{file_name} 不是有效的文件"}, status=400)
+
+            content = file_path.read_text(encoding="utf-8")
+            logger.info(f"[MC_Hack_Mod] 配置文件 {file_name} 读取成功")
+            return web.json_response({"success": True, "fileName": file_name, "content": content})
+        except Exception as e:
+            logger.error(f"[MC_Hack_Mod] getConfig接口错误: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
     async def _load_groups(self):
