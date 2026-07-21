@@ -7,6 +7,8 @@ import json
 import asyncio
 from aiohttp import web
 
+from .game_helper import GameHelper
+
 @register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
 class MyPlugin(Star):
     def __init__(self, context: Context):
@@ -18,6 +20,8 @@ class MyPlugin(Star):
         # HTTP服务器相关
         self.http_runner = None
         self.http_site = None
+        # 小游戏辅助模块
+        self.game_helper = GameHelper()
 
     async def initialize(self):
         """加载已注册的群组信息并启动HTTP服务器。"""
@@ -31,6 +35,9 @@ class MyPlugin(Star):
             app.router.add_get('/health', self._handle_health)
             app.router.add_post('/sendMsg', self._handle_send_msg)
             app.router.add_get('/getConfig', self._handle_get_config)
+            # 小游戏辅助接口
+            app.router.add_get('/game_answer', self.game_helper.handle_get_answer)
+            app.router.add_get('/game_reset', self.game_helper.handle_reset)
             
             self.http_runner = web.AppRunner(app)
             await self.http_runner.setup()
@@ -305,9 +312,47 @@ class MyPlugin(Star):
         
         yield event.plain_result(f"测试消息发送完成: 成功 {success_count} 个, 失败 {fail_count} 个")
 
+    # ---- 小游戏辅助：监听群消息 ----
+
+    @filter.on_message()
+    async def on_message(self, event: AstrMessageEvent):
+        """监听所有消息，提取游戏反馈并推理下一次尝试。"""
+        if event.get_group_id() is None:
+            return
+
+        message_str = event.message_str.strip()
+        if not message_str:
+            return
+
+        result = self.game_helper.process_message(message_str)
+        if result:
+            logger.info(f"[GameHelper] {result}")
+
+    # ---- 小游戏辅助：指令控制 ----
+
+    @filter.command("game_helper")
+    async def game_helper_cmd(self, event: AstrMessageEvent):
+        """管理小游戏辅助模块。子命令: status, reset"""
+        parts = event.message_str.strip().split(maxsplit=1)
+        subcmd = parts[1].strip().lower() if len(parts) > 1 else "status"
+
+        solver = self.game_helper._solver
+
+        if subcmd == "status":
+            yield event.plain_result(
+                f"[GameHelper] 已尝试 {solver.attempt_count} 次, "
+                f"剩余 {len(solver._possible)} 个候选, "
+                f"接口: /game_answer"
+            )
+        elif subcmd == "reset":
+            solver.reset()
+            yield event.plain_result("[GameHelper] 已重置推理状态")
+        else:
+            yield event.plain_result(f"[GameHelper] 未知子命令: {subcmd}。可用: status, reset")
+
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
-        # 关闭HTTP服务器
+        # 关闭主HTTP服务器
         if self.http_site:
             await self.http_site.stop()
             logger.info("[MC_Hack_Mod] HTTP服务器已停止")
