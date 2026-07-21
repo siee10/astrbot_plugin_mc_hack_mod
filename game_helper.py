@@ -70,7 +70,11 @@ class CodeBreakerSolver:
         if len(self._possible) == 1:
             return self._possible[0]
 
-        # 从所有候选（包括已排除的）中选最优猜测，因为有时不在候选集里的猜测能更好地区分
+        # 第一次猜测固定为已知最优起始值 "0123"，避免全量搜索
+        if not self._attempts:
+            return "0123"
+
+        # 候选数少时从全部排列中搜索最优，否则只在候选集内搜索
         search_space = self._all_candidates if len(self._possible) < 50 else self._possible
         best_guess = min(search_space, key=self._worst_case_size)
         return best_guess
