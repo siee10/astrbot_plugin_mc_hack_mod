@@ -314,12 +314,9 @@ class MyPlugin(Star):
 
     # ---- 小游戏辅助：监听群消息 ----
 
-    @filter.on_message()
-    async def on_message(self, event: AstrMessageEvent):
-        """监听所有消息，提取游戏反馈并推理下一次尝试。"""
-        if event.get_group_id() is None:
-            return
-
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def on_group_message(self, event: AstrMessageEvent):
+        """监听群消息，提取游戏反馈并推理下一次尝试。"""
         message_str = event.message_str.strip()
         if not message_str:
             return
