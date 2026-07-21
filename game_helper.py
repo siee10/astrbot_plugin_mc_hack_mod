@@ -51,11 +51,29 @@ class CodeBreakerSolver:
             f"剩余 {len(self._possible)} 个候选"
         )
 
+    def _feedback_key(self, guess: str, secret: str) -> tuple[str, ...]:
+        """将反馈结果转为可哈希的元组，用于分组统计。"""
+        return tuple(_evaluate(guess, secret))
+
+    def _worst_case_size(self, guess: str) -> int:
+        """计算猜测 guess 时，最坏情况下剩余候选数。"""
+        groups: dict[tuple[str, ...], int] = {}
+        for secret in self._possible:
+            key = self._feedback_key(guess, secret)
+            groups[key] = groups.get(key, 0) + 1
+        return max(groups.values()) if groups else 0
+
     def next_guess(self) -> str | None:
-        """返回下一次应该尝试的数字，无可选时返回 None。"""
+        """使用 minimax 策略选择最优猜测，最小化最坏情况下的剩余候选数。"""
         if not self._possible:
             return None
-        return self._possible[0]
+        if len(self._possible) == 1:
+            return self._possible[0]
+
+        # 从所有候选（包括已排除的）中选最优猜测，因为有时不在候选集里的猜测能更好地区分
+        search_space = self._all_candidates if len(self._possible) < 50 else self._possible
+        best_guess = min(search_space, key=self._worst_case_size)
+        return best_guess
 
     @property
     def is_solved(self) -> bool:
