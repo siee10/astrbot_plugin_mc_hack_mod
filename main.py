@@ -321,6 +321,10 @@ class MyPlugin(Star):
         if not message_str:
             return
 
+        # 只处理包含触发词的消息，避免误识别其他人的消息
+        if "露露卡真可爱" not in message_str:
+            return
+
         result = self.game_helper.process_message(message_str)
         if result:
             logger.info(f"[GameHelper] {result}")
